@@ -99,9 +99,12 @@ RUN_DB_TESTS=1 npm test
 ## 10. Docker (development)
 
 ```bash
-docker compose up -d postgres redis   # dependencies only, run `npm run dev` for hot reload
-# — or —
-docker compose up --build             # the whole stack in containers
+docker compose up -d postgres redis   # dependencies only
+npm run db:migrate                    # first time only
+npm run dev                           # hot reload
+# — or, the whole stack in containers —
+docker compose run --rm app npx prisma migrate deploy   # first time only
+docker compose up --build
 ```
 
 Full detail in `docs/DOCKER.md`.

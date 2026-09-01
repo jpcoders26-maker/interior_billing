@@ -24,9 +24,12 @@
 ```bash
 # option 1 (recommended): just the dependencies, run Next.js on the host
 docker compose up -d postgres redis
+npm run db:migrate     # first time only — creates the schema
 npm run dev            # hot reload
 
 # option 2: the whole stack in containers (no local Node/Postgres/Redis needed)
+docker compose up -d postgres redis
+docker compose run --rm app npx prisma migrate deploy   # first time only
 docker compose up --build
 ```
 

@@ -46,7 +46,7 @@ RUN addgroup --system --gid 1001 nodejs \
 
 # Next's dependency tracer for `output: standalone` doesn't reliably pick up
 # Prisma's native query-engine binary, so it's copied in explicitly.
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
