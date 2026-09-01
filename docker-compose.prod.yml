@@ -1,0 +1,97 @@
+# Production stack. See docs/DEPLOYMENT.md for the full runbook.
+#
+# All secrets come from the environment (a real .env.production file that is
+# NEVER committed — see .env.example) — nothing sensitive is hardcoded here.
+#
+# Postgres and Redis publish no ports to the host: the app reaches them only
+# over the internal Compose network (`postgres:5432`, `redis:6379`).
+# `postgres` is behind the `with-db` profile — if you're using a managed
+# Postgres (RDS/Cloud SQL/etc.) instead, just don't pass --profile with-db
+# and point DATABASE_URL at your managed instance.
+#
+# The app itself binds to 127.0.0.1:3000 on the host, not 0.0.0.0 — put a
+# reverse proxy (nginx/Caddy/Traefik) in front for TLS termination and
+# public exposure; this compose file deliberately doesn't include one since
+# the right choice (and its cert setup) is environment-specific.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required — generate with: openssl rand -base64 48}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      NODE_ENV: production
+      NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Teakworks}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    read_only: false # Next.js writes cache files under .next at runtime; see docs/DOCKER.md
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--save", "60", "1"]
+    volumes:
+      - redis_prod_data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    profiles: ["with-db"]
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-furniture_db}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:

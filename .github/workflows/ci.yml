@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  # Fast checks that don't need a database — fail here before spinning up Postgres.
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+
+  # Dependency / secret scanning — informational for now (continue-on-error),
+  # since npm audit's exit code doesn't distinguish "new" from "already
+  # triaged" vulnerabilities (see docs/ARCHITECTURE-AUDIT.md and SECURITY.md
+  # §18 for the 3 currently-accepted, Prisma-CLI-only findings). A human
+  # should read this job's output on every PR, not just its pass/fail.
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: npm audit (report only — see SECURITY.md §18 for accepted findings)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      - name: Scan for committed secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
+  test-and-build:
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: teakworks
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: furniture_db_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U teakworks -d furniture_db_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://teakworks:ci_password@localhost:5432/furniture_db_test?schema=public
+      AUTH_SECRET: ci-only-secret-not-for-production-0000000000000000
+      NODE_ENV: test
+      RUN_DB_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+      - name: Run tests (unit + DB integration)
+        run: npm test
+      - name: Production build
+        run: npm run build
+        env:
+          NODE_ENV: production
