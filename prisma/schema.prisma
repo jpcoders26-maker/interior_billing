@@ -1,3 +1,19 @@
+// Teakworks Furniture Billing System — production schema.
+//
+// Design notes (see docs/DATABASE.md and docs/ARCHITECTURE-AUDIT.md §4.4 for
+// the full rationale):
+//   - Flat, independently-queried entities (Client, Project, Worker,
+//     WorkerAllocation, Attendance, Document, ActivityLog, User) are fully
+//     relational: real PKs/FKs/unique constraints/indexes.
+//   - Company and Subscription are workspace-wide singleton rows (id is
+//     always 1) — this app is single-tenant.
+//   - Quote/Invoice have relational header columns but keep their nested
+//     `rooms -> items` line-item tree as a single validated Json column.
+//     The seed/legacy data proves room/item ids are unique only *within* a
+//     document (not globally), so a normalized Room/Item table would require
+//     inventing an ID scheme the app has never had. Zod validates the shape
+//     of this JSON on every write (see src/lib/validation/documents.ts).
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,182 +23,250 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  ADMIN
+  USER
+}
+
+enum TaxMode {
+  GST
+  NOGST
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PAID
+  OVERDUE
+}
+
+// ---------------------------------------------------------------------------
+// Auth / users — managed only via the admin-only /api/users endpoint.
+// ---------------------------------------------------------------------------
 model User {
-  id        String   @id @default(cuid())
+  id           String   @id @default(cuid())
+  userId       String   @unique // the human-chosen login id, e.g. "admin"
+  name         String
+  email        String?  @unique // nullable + unique: Postgres allows multiple NULLs, matching the previous optional-email behavior
+  passwordHash String
+  role         Role     @default(USER)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([role])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Workspace-wide singletons (id is always 1 — enforced in the service layer).
+// ---------------------------------------------------------------------------
+model Company {
+  id        Int      @id @default(1)
   name      String
-  email     String   @unique
-  password  String?
-  emailVerified DateTime?
-  role      String   @default("user")
+  tagline   String?
+  gstin     String?
+  stateCode String
+  logo      String? // data URL; small, admin-uploaded — see docs/DATABASE.md
+  address   String?
+  phone     String?
+  email     String?
+  bankName  String?
+  bankAcc   String?
+  bankIfsc  String?
+  bankUpi   String?
+  terms     String?
+  updatedAt DateTime @updatedAt
+
+  @@map("company")
+}
+
+model Subscription {
+  id        Int      @id @default(1)
+  plan      String
+  status    String
+  startedAt DateTime
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+
+  @@map("subscription")
+}
+
+// ---------------------------------------------------------------------------
+// Core business entities.
+// ---------------------------------------------------------------------------
+model Client {
+  id        String   @id
+  name      String
+  contact   String?
+  gstin     String?
+  stateCode String
+  phone     String?
+  email     String?
+  billing   String?
+  shipping  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  assignedLeads Lead[]
-  managedProjects Project[]
-}
 
-model Lead {
-  id             String   @id @default(cuid())
-  name           String
-  phone          String
-  enquiryDate    DateTime @default(now())
-  source         String?
-  siteLocation   String?
-  workRequired   String?
-  estimatedBudget Float?
-  expectedStart  DateTime?
-  assignedToId   String? 
-  assignedTo     User?    @relation(fields: [assignedToId], references: [id])
-  followupDate   DateTime?
-  status         String   @default("New")
-  notes          String?
-  createdAt      DateTime @default(now())
-}
+  projects Project[]
+  quotes   Quote[]
+  invoices Invoice[]
 
-model Customer {
-  id           String   @id @default(cuid())
-  name         String
-  mobile       String?
-  whatsapp     String?
-  email        String?
-  billingAddress String?
-  siteAddress  String?
-  gstNumber    String?
-  panNumber    String?
-  customerType String?
-  notes        String?
-  createdAt    DateTime @default(now())
-  projects     Project[]
-  quotations   Quotation[]
-  invoices     Invoice[]
+  @@index([name])
+  @@map("clients")
 }
 
 model Project {
-  id           String   @id @default(cuid())
-  name         String
-  siteAddress  String?
-  startDate    DateTime?
-  expectedCompletion DateTime?
-  managerId    String?
-  manager      User?    @relation(fields: [managerId], references: [id])
-  contractValue Float?
-  customerId   String
-  customer     Customer @relation(fields: [customerId], references: [id])
-  workCategories WorkCategory[]
-  materials    ProjectMaterial[]
-  expenses     Expense[]
-  invoices     Invoice[]
-  quotations   Quotation[]
-  purchases    Purchase[]
-  createdAt    DateTime @default(now())
-}
-
-model WorkCategory {
-  id        String  @id @default(cuid())
-  projectId String
-  project   Project @relation(fields: [projectId], references: [id])
+  id        String    @id
   name      String
-  description String?
-  contractValue Float?
-  progress  Int     @default(0)
+  status    String    @default("planning")
+  progress  Int       @default(0)
+  start     DateTime?
+  due       DateTime?
+  value     Decimal?  @db.Decimal(14, 2)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  documents   Document[]
+  allocations WorkerAllocation[]
+  quotes      Quote[]
+  invoices    Invoice[]
+
+  @@index([clientId])
+  @@index([status])
+  @@map("projects")
 }
 
-model Quotation {
-  id         String @id @default(cuid())
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
-  projectId  String?
-  project    Project? @relation(fields: [projectId], references: [id])
-  title      String
-  version    Int     @default(1)
-  status     String  @default("Draft")
-  items      QuotationItem[]
-  subtotal   Float? 
-  discount   Float? 
-  gst        Float? 
-  total      Float? 
-  createdAt  DateTime @default(now())
+model Worker {
+  id        String   @id
+  name      String
+  skill     String?
+  phone     String?
+  rate      Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  allocations WorkerAllocation[]
+  attendance  Attendance[]
+
+  @@map("workers")
 }
 
-model QuotationItem {
-  id          String @id @default(cuid())
-  quotationId String
-  quotation   Quotation @relation(fields: [quotationId], references: [id])
-  description String
-  qty         Float   @default(1)
-  unit        String?
-  rate        Float
-  amount      Float
-  category    String?
+// One worker assigned to at most one active project at a time (mirrors the
+// existing UI, which offers a single "assigned site" selector per worker).
+model WorkerAllocation {
+  workerId  String
+  projectId String
+  createdAt DateTime @default(now())
+
+  worker  Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([workerId])
+  @@index([projectId])
+  @@map("worker_allocations")
+}
+
+model Attendance {
+  id       String   @id
+  workerId String
+  date     DateTime @db.Date
+  inTime   String?
+  outTime  String?
+
+  worker Worker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId, date])
+  @@map("attendance")
+}
+
+model Document {
+  id        String   @id
+  projectId String
+  name      String
+  kind      String
+  mimeType  String?
+  sizeBytes Int? // authoritative, computed server-side from the decoded upload
+  sizeLabel String? // client-formatted display string (e.g. "4.2 MB"), shown as-is in the UI
+  fileData  Bytes? // decoded file content; see docs/DATABASE.md §4 for the tradeoffs
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("documents")
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  who       String
+  action    String
+  at        String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("activity_log")
+}
+
+// ---------------------------------------------------------------------------
+// Quotations & invoices — relational header, validated JSON line-item tree.
+// ---------------------------------------------------------------------------
+model Quote {
+  id       String      @id
+  number   String      @unique
+  taxMode  TaxMode     @default(GST)
+  status   QuoteStatus @default(DRAFT)
+  gstRate  Decimal     @default(18) @db.Decimal(5, 2)
+  discount Decimal     @default(0) @db.Decimal(14, 2)
+  date     DateTime    @db.Date
+  rooms    Json        @default("[]")
+
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([projectId])
+  @@index([status])
+  @@map("quotes")
 }
 
 model Invoice {
-  id         String @id @default(cuid())
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
-  projectId  String?
-  project    Project? @relation(fields: [projectId], references: [id])
-  invoiceNumber String @unique
-  date       DateTime @default(now())
-  dueDate    DateTime?
-  amount     Float
-  paidAmount Float  @default(0)
-  status     String @default("Unpaid")
-  payments   Payment[]
-}
+  id       String        @id
+  number   String        @unique
+  docType  String // "Tax Invoice" | "Bill of Supply" | "Proforma Invoice"
+  taxMode  TaxMode       @default(GST)
+  status   InvoiceStatus @default(UNPAID)
+  gstRate  Decimal       @default(18) @db.Decimal(5, 2)
+  discount Decimal       @default(0) @db.Decimal(14, 2)
+  date     DateTime      @db.Date
+  dueDate  DateTime?     @db.Date
+  rooms    Json          @default("[]")
 
-model Payment {
-  id        String @id @default(cuid())
-  invoiceId String
-  invoice   Invoice @relation(fields: [invoiceId], references: [id])
-  date      DateTime @default(now())
-  amount    Float
-  method    String
-  reference String?
-}
-
-model Expense {
-  id        String @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
   projectId String?
-  project   Project? @relation(fields: [projectId], references: [id])
-  category  String
-  amount    Float
-  date      DateTime @default(now())
-  notes     String?
-}
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
-model Material {
-  id        String @id @default(cuid())
-  name      String
-  unit      String
-  sku       String?
   createdAt DateTime @default(now())
-  purchases Purchase[]
-  projectMaterials ProjectMaterial[]
-}
+  updatedAt DateTime @updatedAt
 
-model Purchase {
-  id         String @id @default(cuid())
-  supplier   String
-  invoiceNo  String?
-  date       DateTime @default(now())
-  materialId String
-  material   Material @relation(fields: [materialId], references: [id])
-  qty        Float
-  rate       Float
-  gst        Float?
-  total      Float
-  projectId  String?
-  project    Project? @relation(fields: [projectId], references: [id])
+  @@index([clientId])
+  @@index([projectId])
+  @@index([status])
+  @@map("invoices")
 }
-
-model ProjectMaterial {
-  id        String @id @default(cuid())
-  projectId String
-  project   Project @relation(fields: [projectId], references: [id])
-  materialId String
-  material  Material @relation(fields: [materialId], references: [id])
-  qtyUsed   Float
-  wastage   Float?
-}
-
-// Add indexes or other models as needed
