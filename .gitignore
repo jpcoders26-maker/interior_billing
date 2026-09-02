@@ -46,6 +46,3 @@ logs/
 .vscode/*
 !.vscode/extensions.json
 .idea/
-
-# docker
-docker-compose.override.yml

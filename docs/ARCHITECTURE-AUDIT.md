@@ -5,6 +5,15 @@ Phase 1 deliverable: current-state inspection, problems found, and the decisions
 that shaped the rest of the work. See `docs/ARCHITECTURE.md` for the resulting
 design and `SECURITY.md` for the security posture after remediation.
 
+> **Amendment**: this audit's original migration shipped a Docker-based
+> deployment (Dockerfile, dev/prod Compose files) per the brief's Phases
+> 22-27. The developer's actual machine doesn't use Docker, so that whole
+> layer — sound as it was — was dead weight for how this app is actually
+> run; it's been removed at their explicit request in favor of a plain
+> Node.js deployment (PM2/systemd — see `docs/DEPLOYMENT.md`). Left here
+> rather than edited out, since this document is a record of what was
+> decided and why at the time, not a living spec.
+
 ## 1. What this app is
 
 A single-tenant (one company, shared workspace) Next.js 14 App Router ERP for a

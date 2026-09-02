@@ -3,8 +3,9 @@
 // Backed by Redis (fixed-window counter via a single atomic Lua script) so
 // the limit is shared correctly across every app container/instance — see
 // SECURITY.md §9 and Phase 13 of the brief ("must not be a plain in-memory
-// object for a multi-instance production app"). docker-compose*.yml runs a
-// `redis` service; REDIS_URL points the app at it.
+// object for a multi-instance production app"). Point REDIS_URL at any
+// reachable Redis instance (a managed cloud Redis, or one installed
+// alongside the app) — see docs/DEPLOYMENT.md.
 //
 // When REDIS_URL is unset (bare `npm run dev` with no Redis running) this
 // falls back to an in-memory counter. That fallback is explicitly dev-only:

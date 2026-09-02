@@ -177,10 +177,11 @@ order — see `proxy.ts` and `src/lib/server/session.ts`.
 
 - Backed by **Redis** (`src/lib/server/rate-limit.ts`), via a single atomic
   `INCR`+`PEXPIRE` Lua script (fixed-window counter) — chosen because it's
-  correct across every app container/instance sharing one Redis, unlike an
+  correct across every app process/instance sharing one Redis, unlike an
   in-process counter, satisfying the brief's explicit requirement that rate
-  limiting "must work across multiple Docker containers." `docker-compose*.yml`
-  runs a `redis` service for this.
+  limiting must work across more than one running instance. Point
+  `REDIS_URL` at any reachable Redis (self-hosted or managed) in production
+  — see `docs/DEPLOYMENT.md`.
 - Limits (`proxy.ts`): `/api/auth/*` — 10 requests/minute/IP.
   `/api/*` generally — 120 requests/minute/IP.
 - **Explicit, documented dev-only fallback**: if `REDIS_URL` is unset, the
@@ -229,13 +230,12 @@ once this can be verified in a real browser.
 - `.env.example` contains **only placeholders**, never real values.
 - No secret is ever put behind `NEXT_PUBLIC_`. `NEXT_PUBLIC_APP_NAME` is the
   only public env var and it's non-sensitive (a display string).
-- Docker images never bake in real secrets (`Dockerfile`'s build stage uses a
-  fixed placeholder `DATABASE_URL` purely so `next build` can statically
-  analyze route modules — nothing queries the DB at build time; real values
-  are injected at container run time via environment variables — see
-  `docker-compose.prod.yml`, which requires `DATABASE_URL`, `AUTH_SECRET`,
-  `REDIS_PASSWORD`, and Postgres credentials from the environment with no
-  defaults, failing to start rather than falling back to something insecure).
+- Real secrets are never committed or built into the app — they're set as
+  actual environment variables on the host (or in the process manager's
+  config — see `docs/DEPLOYMENT.md`) and read at runtime. `AUTH_SECRET` is
+  required with no insecure default in production (§2); a missing/invalid
+  `DATABASE_URL` fails loudly (a clear Prisma connection error, not a silent
+  fallback) rather than the app limping along against nothing.
 - Logs never contain passwords, hashes, tokens, cookies, or `DATABASE_URL`/
   `AUTH_SECRET` — see §14.
 
@@ -255,37 +255,43 @@ once this can be verified in a real browser.
   endpoints — `src/services/*.service.ts`) runs inside a single
   `prisma.$transaction`, so a partial failure can't leave, e.g., three of
   five clients deleted and two not.
-- **Least privilege**: `docker-compose.prod.yml` doesn't hardcode a
-  superuser-equivalent role — the app connects as whatever `POSTGRES_USER`
-  the operator provisions; production deployment docs
-  (`docs/DEPLOYMENT.md`) recommend a role scoped to just this app's schema,
-  not a shared/admin Postgres account.
-- Postgres itself is never exposed to the public internet by this project's
-  own Docker Compose files — see §13.
+- **Least privilege**: production deployment docs (`docs/DEPLOYMENT.md`)
+  recommend a Postgres role scoped to just this app's schema, not a
+  shared/admin superuser account — `DATABASE_URL` determines which role the
+  app connects as, and nothing in the app requires superuser privileges.
+- Postgres should never be exposed to the public internet — bind it to
+  `localhost`/an internal network interface and reach it only from the app
+  host, or from a private network if they're on separate machines. See §13.
 
-## 13. Docker security
+## 13. Process / host security
 
-- **Multi-stage build** (`Dockerfile`): the final image contains only the
-  Next.js standalone server output, static assets, and the generated Prisma
-  client — no dev dependencies, no build toolchain (the `python3`/`make`/
-  `g++` needed to compile `argon2`'s native addon exist only in the
-  intermediate `deps` stage), no `.git`, no tests, no `.env`.
-- **Non-root**: the final stage creates and runs as an unprivileged `nextjs`
-  user (uid 1001), not root.
-- **`no-new-privileges:true`** on every service in `docker-compose.prod.yml`.
-- **No privileged mode, no host networking, no Docker socket mount**,
-  anywhere in either compose file.
-- **Explicit resource limits** (`deploy.resources.limits`) on every service
-  in `docker-compose.prod.yml`.
-- **Healthcheck** built into the image (`Dockerfile HEALTHCHECK`, hitting
-  `/api/health`) and used as the Compose `depends_on: condition:
-  service_healthy` gate.
-- **Postgres/Redis are never published to the host** in
-  `docker-compose.prod.yml` — only reachable over the internal Compose
-  network (`postgres:5432`, `redis:6379`). `docker-compose.yml` (dev)
-  deliberately does expose them to `localhost` for developer convenience —
-  documented as a dev-only exception in that file.
-- No secret is baked into any image layer — see §11.
+This app runs as a plain Node.js process (no Docker — see
+`docs/DEPLOYMENT.md`), so the isolation Docker would otherwise provide comes
+from standard OS-level practices instead:
+
+- **Non-root**: run the app as a dedicated, unprivileged OS user (the
+  `docs/DEPLOYMENT.md` systemd example uses `User=teakworks`), never as
+  `root`/Administrator. That user should own nothing outside its own
+  application directory.
+- **File permissions**: the file holding production secrets (an
+  `EnvironmentFile`, or equivalent) should be readable only by that user
+  (`chmod 600` on Linux).
+- **Network exposure**: the app listens on `127.0.0.1`/an internal
+  interface, not `0.0.0.0` on a publicly routable one — a reverse proxy is
+  the only thing that should be internet-facing (`docs/DEPLOYMENT.md`).
+  Postgres and Redis likewise bind to `localhost` or a private network
+  interface, never a public one.
+- **Process supervision**: PM2 or systemd (`docs/DEPLOYMENT.md`) restarts
+  the app if it crashes and forwards `SIGTERM`/`SIGINT` correctly, which
+  `src/instrumentation.ts` uses for a clean shutdown (closing DB
+  connections) rather than an abrupt kill.
+- **Firewall**: only the reverse proxy's port (443, and 80 for redirect)
+  should be reachable from outside the host; the app's own port and
+  Postgres/Redis's ports should be blocked at the OS firewall from anything
+  but localhost/the private network, as a second layer behind "don't bind
+  to a public interface" above.
+- No secret is ever committed to the repository or baked into a build
+  artifact — see §11.
 
 ## 14. Logging
 
@@ -306,9 +312,9 @@ once this can be verified in a real browser.
 
 - `GET /api/health` — liveness only (process is up), no dependency checks.
 - `GET /api/ready` — readiness: actually runs `SELECT 1` against Postgres and
-  returns `503` if the database is unreachable. Used as the Docker/Compose
-  healthcheck target and is what an orchestrator (or a load balancer) should
-  poll before routing traffic to an instance.
+  returns `503` if the database is unreachable. Used as the process
+  manager/load balancer's healthcheck target — poll this one before routing
+  traffic to an instance, not `/api/health`.
 - Neither endpoint returns environment variables, stack traces, or any
   infrastructure detail beyond `{ status, database }`.
 - No APM/metrics exporter is wired up (no Sentry/Datadog/etc.) — this app
@@ -318,10 +324,10 @@ once this can be verified in a real browser.
 
 ## 16. Backup strategy
 
-See `docs/DISASTER-RECOVERY.md` for the full runbook. Summary: **a Docker
-volume is not a backup** — `pg_dump` on a schedule, retained and tested
-separately from the container's own storage. That document covers RPO/RTO,
-retention, and restore-testing.
+See `docs/DISASTER-RECOVERY.md` for the full runbook. Summary: **the
+Postgres data directory itself is not a backup** — `pg_dump` on a schedule,
+shipped off the host and retained/tested independently. That document
+covers RPO/RTO, retention, and restore-testing.
 
 ## 17. Incident response
 
@@ -354,10 +360,11 @@ If credentials are suspected compromised:
   `docs/ARCHITECTURE-AUDIT.md` §4.3 for why v7 — which does fix it, via an
   unrelated rewrite of the config system — wasn't adopted instead). This is
   **not reachable from the running application**: `@prisma/config` is only a
-  dependency of the `prisma` CLI (`migrate`/`generate`/`studio`), which never
-  ships in the production Docker image (`Dockerfile`'s final stage copies
-  only the generated client, not the CLI) and never runs against untrusted
-  input in this app's request path. Tracked for resolution when upgrading to
+  dependency of the `prisma` CLI (`migrate`/`generate`/`studio`), which the
+  running server process never imports — the CLI is invoked only as an
+  explicit, one-off deploy-time command (`prisma migrate deploy`, see
+  `docs/DEPLOYMENT.md`), fed only this repo's own schema/migration files,
+  never attacker-controlled input. Tracked for resolution when upgrading to
   Prisma 7+.
 - Everything else audit found (a critical Vitest RCE, several Vite/esbuild
   issues, an eslint ReDoS, a PostCSS XSS/path-traversal chain) was fixed by

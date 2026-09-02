@@ -39,20 +39,14 @@ const securityHeaders = [
     value: "camera=(), microphone=(), geolocation=(), interest-cohort=(), browsing-topics=()",
   },
   // HSTS only makes sense once TLS is actually terminated in front of the
-  // app (see docs/DEPLOYMENT.md) — it's a no-op over plain HTTP, and the
-  // reverse-proxy examples in docs/DOCKER.md/DEPLOYMENT.md always terminate
-  // TLS before traffic reaches this app.
+  // app — it's a no-op over plain HTTP, and the reverse-proxy example in
+  // docs/DEPLOYMENT.md always terminates TLS before traffic reaches this app.
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
 ];
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  // Self-contained server bundle for the Docker runtime stage — see
-  // Dockerfile/docs/DOCKER.md. Next's dependency tracer doesn't always pick
-  // up Prisma's native query-engine binary, so the Dockerfile copies
-  // node_modules/.prisma and node_modules/@prisma/client in manually.
-  output: "standalone",
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

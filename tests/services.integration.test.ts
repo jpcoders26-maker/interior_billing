@@ -1,10 +1,10 @@
 // Integration tests against the real service layer + a real Postgres
-// database — not runnable in this sandbox (no Docker/Postgres available
+// database — not runnable in this sandbox (no live Postgres available
 // here, see docs/ARCHITECTURE-AUDIT.md §5). CI runs these against a
 // disposable Postgres service container (see .github/workflows/ci.yml).
 //
-// To run locally: `docker compose up -d postgres`, `npm run db:migrate`,
-// then `RUN_DB_TESTS=1 npm test`.
+// To run locally: point DATABASE_URL at a real Postgres (see
+// docs/DATABASE.md §1), `npm run db:migrate`, then `RUN_DB_TESTS=1 npm test`.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ProjectInput } from "@/lib/validation/projects";
 

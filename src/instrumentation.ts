@@ -1,6 +1,6 @@
 // Next.js's `register()` hook — runs once when the server process starts.
 // Used here purely for graceful shutdown (Phase 36): on SIGTERM/SIGINT
-// (what Docker/Kubernetes send to stop a container), stop accepting new
+// (what a process manager/OS sends to stop the app), stop accepting new
 // Prisma work and close the connection pool cleanly instead of letting
 // in-flight queries get killed mid-transaction. The actual process.on/
 // process.exit calls live in graceful-shutdown.ts, imported dynamically

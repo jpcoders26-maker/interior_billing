@@ -6,10 +6,11 @@ monthly reports, documents, subscription management, secure auth with admin-mana
 users, and a uploadable company logo.
 
 Production-hardened on **PostgreSQL + Prisma**, with Zod validation, RBAC,
-Redis-backed rate limiting, security headers, and Docker deployment — see
-`docs/ARCHITECTURE.md` for the full design and `SECURITY.md` for the
-security posture. `docs/ARCHITECTURE-AUDIT.md` records what this app looked
-like before that work and why each decision was made.
+Redis-backed rate limiting, and security headers — see `docs/ARCHITECTURE.md`
+for the full design and `SECURITY.md` for the security posture.
+`docs/ARCHITECTURE-AUDIT.md` records what this app looked like before that
+work and why each decision was made. No Docker — this app runs as a plain
+Node.js process; see `docs/DEPLOYMENT.md`.
 
 ## 1. Overview
 
@@ -19,16 +20,17 @@ like before that work and why each decision was made.
 - Session auth (httpOnly JWT cookie, Argon2id password hashing), RBAC
   (`admin`/`user`), Redis-backed rate limiting, CSP + standard security
   headers.
-- Docker (dev and production Compose files), GitHub Actions CI (lint,
-  typecheck, test against a real Postgres, build, dependency audit).
+- Plain Node.js deployment (PM2/systemd — no Docker), GitHub Actions CI
+  (lint, typecheck, test against a real Postgres, build, dependency audit).
 
 ## 2. Requirements
 
 - Node.js 20.9+ and npm.
-- PostgreSQL 14+ (or `docker compose up postgres`).
+- PostgreSQL 14+, installed locally or reachable over the network — see
+  `docs/DATABASE.md` §1 for setup (no Docker needed or used anywhere in this
+  project).
 - Redis (optional in dev — see `SECURITY.md` §9; recommended/required in
   production).
-- Docker + Docker Compose, if deploying via containers.
 
 ## 3. Installation
 
@@ -48,17 +50,18 @@ required in production), `REDIS_URL` (rate limiting — recommended),
 ## 5. Development
 
 ```bash
-docker compose up -d postgres redis   # local Postgres + Redis
-npm run db:migrate                    # create the schema
+npm run db:migrate                    # create the schema (see §6 first if
+                                       # Postgres isn't set up yet)
 npm run db:seed                       # demo data — see the accounts table below
 npm run dev                           # http://localhost:3000
 ```
 
 ## 6. PostgreSQL setup
 
-Either `docker compose up -d postgres` (matches `.env.example`'s defaults out
-of the box) or point `DATABASE_URL` at any Postgres 14+ instance. Full detail
-in `docs/DATABASE.md`.
+Install PostgreSQL locally (no Docker) and create the role/database
+`.env.example` expects — full walkthrough, including the pgAdmin GUI steps,
+in `docs/DATABASE.md` §1. Already have a Postgres role/database you'd rather
+use? Just point `DATABASE_URL` in `.env` at it instead.
 
 ## 7. Prisma setup
 
@@ -91,51 +94,29 @@ To run the database integration tests locally (they run for real in CI
 against a disposable Postgres — see `.github/workflows/ci.yml`):
 
 ```bash
-docker compose up -d postgres
 npm run db:migrate
 RUN_DB_TESTS=1 npm test
 ```
 
-## 10. Docker (development)
+## 10. Deployment
 
-```bash
-docker compose up -d postgres redis   # dependencies only
-npm run db:migrate                    # first time only
-npm run dev                           # hot reload
-# — or, the whole stack in containers —
-docker compose run --rm app npx prisma migrate deploy   # first time only
-docker compose up --build
-```
+No Docker — this app deploys as a plain Node.js process, run under a
+process manager (PM2 or systemd). Full walkthrough — build/run commands,
+process manager configs, TLS/reverse-proxy setup, environment variable
+reference, CI/CD pipeline description, and rollback guidance:
+`docs/DEPLOYMENT.md`.
 
-Full detail in `docs/DOCKER.md`.
-
-## 11. Docker (production)
-
-```bash
-docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml run --rm app npx prisma migrate deploy
-docker compose -f docker-compose.prod.yml --profile with-db up -d
-```
-
-Full detail, including secret handling and networking, in `docs/DOCKER.md`.
-
-## 12. Deployment
-
-Environment variable reference, TLS/reverse-proxy notes, CI/CD pipeline
-description, and rollback guidance: `docs/DEPLOYMENT.md`.
-
-## 13. Security
+## 11. Security
 
 Full security architecture, what's implemented and why, and known
 limitations stated plainly: `SECURITY.md`.
 
-## 14. Backup
+## 12. Backup
 
 `pg_dump`-based backup/restore procedure, retention, RPO/RTO, and restore
-testing: `docs/DISASTER-RECOVERY.md`. **A Docker volume is not a backup** —
-that document explains why and what to do instead.
+testing: `docs/DISASTER-RECOVERY.md`.
 
-## 15. Troubleshooting
+## 13. Troubleshooting
 
 See `docs/DEPLOYMENT.md`'s Troubleshooting section for common startup/deploy
 issues (missing `AUTH_SECRET`, DB connectivity, rate-limiter Redis fallback).

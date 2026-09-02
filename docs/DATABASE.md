@@ -5,24 +5,39 @@ why 6.x rather than the newer-but-architecturally-different 7.x/8.0-RC).
 
 ## 1. Local setup
 
+This project doesn't use Docker — install PostgreSQL 14+ directly (the
+[EDB Windows installer](https://www.postgresql.org/download/windows/),
+Homebrew on macOS, or your distro's package on Linux all work fine; it
+ships with **pgAdmin**, a GUI you can use for everything below instead of
+the command line).
+
+Create the role and database the app expects (matches `.env.example`'s
+defaults — open pgAdmin, connect with the superuser/`postgres` password you
+set during install, open the **Query Tool**, and run):
+
+```sql
+CREATE ROLE teakworks WITH LOGIN PASSWORD 'teakworks_dev_password';
+CREATE DATABASE furniture_db OWNER teakworks;
+```
+
+(Or via `psql`, if it's on your `PATH`: `psql -U postgres -c "CREATE ROLE teakworks WITH LOGIN PASSWORD 'teakworks_dev_password';" -c "CREATE DATABASE furniture_db OWNER teakworks;"`)
+
+Then:
+
 ```bash
-# start just Postgres (and Redis, for rate limiting — see SECURITY.md §9)
-docker compose up -d postgres redis
+cp .env.example .env    # defaults already match the role/database above
 
-# copy env and point it at that container (defaults already match)
-cp .env.example .env
-
-# create the schema
-npm run db:migrate
-
-# seed demo data (admin/admin123, rohit/user123 — same as before this migration)
-npm run db:seed
-
+npm run db:migrate      # create the schema
+npm run db:seed         # demo data (admin/admin123, rohit/user123 — unchanged)
 npm run dev
 ```
 
-Without Docker: install Postgres 14+ locally, create a database, and set
-`DATABASE_URL` in `.env` to point at it.
+Already have a Postgres role/database you'd rather use instead? Just point
+`DATABASE_URL` in `.env` at it — nothing else needs those specific
+credentials.
+
+`REDIS_URL` can stay unset in development — see `SECURITY.md` §9 for the
+in-memory rate-limiting fallback that kicks in without it.
 
 ## 2. Prisma Client
 
@@ -31,7 +46,7 @@ cached on `globalThis` outside production. This matters because Next.js's
 dev-mode hot module reload re-evaluates modules on every edit — without the
 cache, every edit would open a fresh connection pool and eventually exhaust
 Postgres's connection limit. In production this app runs as a small number
-of long-lived Node processes (see `docker-compose.prod.yml` — not
+of long-lived Node processes (started via `npm run start`, not
 per-request serverless functions), so one client per process is correct.
 
 **Connection pooling**: Prisma's default pool (sized from `DATABASE_URL`'s

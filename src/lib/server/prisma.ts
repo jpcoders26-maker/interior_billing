@@ -4,7 +4,7 @@
 // Next.js's module hot-reload would otherwise create a fresh client (and a
 // fresh pool) on every edit, quickly exhausting Postgres's connection limit.
 // In production this app runs as a small number of long-lived Node
-// processes (see docker-compose*.yml — not a per-request serverless
+// processes (started via `npm run start`, not a per-request serverless
 // function), so a single shared client per process is correct and the
 // standard `?connection_limit=` query param on DATABASE_URL is enough pool
 // sizing; there's no need for pgBouncer/Accelerate here. If this is ever
