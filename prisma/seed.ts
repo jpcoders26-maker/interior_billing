@@ -149,9 +149,9 @@ async function main() {
   for (const a of alloc) await prisma.workerAllocation.upsert({ where: { workerId: a.workerId }, create: a, update: a });
 
   const attendance = [
-    { id: "A1", workerId: "W1", date: todayMinus(1), inTime: "09:05", outTime: "18:10" },
-    { id: "A2", workerId: "W2", date: todayMinus(1), inTime: "09:20", outTime: "18:00" },
-    { id: "A3", workerId: "W1", date: todayMinus(0), inTime: "09:00", outTime: null },
+    { id: "A1", workerId: "W1", projectId: "P1", date: todayMinus(1), inTime: "09:05", outTime: "18:10" },
+    { id: "A2", workerId: "W2", projectId: "P1", date: todayMinus(1), inTime: "09:20", outTime: "18:00" },
+    { id: "A3", workerId: "W1", projectId: "P1", date: todayMinus(0), inTime: "09:00", outTime: null },
   ];
   for (const a of attendance) await prisma.attendance.upsert({ where: { id: a.id }, create: a, update: {} });
 

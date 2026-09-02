@@ -99,6 +99,29 @@ Argon2id with transparent upgrade. No security headers → CSP + the standard
 set. Next.js 14 → 16, React 18 → 19.2. JavaScript API routes → TypeScript
 with `strict: true`.
 
+## Manpower cost by site
+
+`Attendance` carries a `projectId` (nullable — a check-in doesn't have to be
+assigned to a site) alongside `workerId`/`date`, recorded per day rather than
+inferred from a worker's *current* site assignment
+(`WorkerAllocation`/`alloc`). This matters because allocation only tracks
+where a worker is assigned *right now* — a worker reassigned mid-month would
+otherwise have every day's cost attributed to whichever site they happened
+to be on when someone last looked, silently misattributing spend between
+sites for that whole billing period.
+
+`components/views/Attendance.jsx`'s daily tab defaults each new check-in's
+site to the worker's current allocation (`siteOf()`), but it's an editable
+per-row dropdown — correct a specific day if a worker was actually pulled to
+help at a different site than their nominal assignment. The monthly report
+tab groups the month's attendance by `projectId` (falling back to an
+"Unassigned site" bucket for records with none) and, within each site, by
+worker — computing days-present/hours/payable per worker *per site they
+actually worked at that month*, with a subtotal per site and a grand total
+across all of them. A worker who split a month across two sites shows up as
+two rows, one under each site, which is the correct behavior for tracking
+what was actually spent where.
+
 ## Follow-ups (deliberately out of scope for this pass)
 
 Recorded here so they're a choice, not a gap someone finds by accident:

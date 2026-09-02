@@ -13,6 +13,8 @@ export const attendanceEntrySchema = z.object({
   date: dateOnlySchema,
   inTime: timeSchema,
   outTime: timeSchema,
+  // which site the worker was at that day — see src/components/views/Attendance.jsx
+  projectId: idSchema.optional().or(z.literal("")),
 });
 export type AttendanceInput = z.infer<typeof attendanceEntrySchema>;
 export const attendanceListSchema = z.array(attendanceEntrySchema).max(50_000);

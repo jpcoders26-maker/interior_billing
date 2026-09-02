@@ -16,11 +16,17 @@ defaults — open pgAdmin, connect with the superuser/`postgres` password you
 set during install, open the **Query Tool**, and run):
 
 ```sql
-CREATE ROLE teakworks WITH LOGIN PASSWORD 'teakworks_dev_password';
+CREATE ROLE teakworks WITH LOGIN CREATEDB PASSWORD 'teakworks_dev_password';
 CREATE DATABASE furniture_db OWNER teakworks;
 ```
 
-(Or via `psql`, if it's on your `PATH`: `psql -U postgres -c "CREATE ROLE teakworks WITH LOGIN PASSWORD 'teakworks_dev_password';" -c "CREATE DATABASE furniture_db OWNER teakworks;"`)
+`CREATEDB` is only needed for `npm run db:migrate` (development) — Prisma
+creates a temporary "shadow database" to diff schema changes against, which
+requires the role to be able to create databases. It's not needed in
+production, where `npm run db:migrate:deploy` just applies already-created
+migration files and never touches a shadow database.
+
+(Or via `psql`, if it's on your `PATH`: `psql -U postgres -c "CREATE ROLE teakworks WITH LOGIN CREATEDB PASSWORD 'teakworks_dev_password';" -c "CREATE DATABASE furniture_db OWNER teakworks;"`)
 
 Then:
 

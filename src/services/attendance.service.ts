@@ -8,10 +8,25 @@ export interface AttendanceDTO {
   date: string;
   inTime: string;
   outTime: string;
+  projectId: string;
 }
 
-function toClientShape(row: { id: string; workerId: string; date: Date; inTime: string | null; outTime: string | null }): AttendanceDTO {
-  return { id: row.id, workerId: row.workerId, date: toDateOnly(row.date), inTime: row.inTime ?? "", outTime: row.outTime ?? "" };
+function toClientShape(row: {
+  id: string;
+  workerId: string;
+  date: Date;
+  inTime: string | null;
+  outTime: string | null;
+  projectId: string | null;
+}): AttendanceDTO {
+  return {
+    id: row.id,
+    workerId: row.workerId,
+    date: toDateOnly(row.date),
+    inTime: row.inTime ?? "",
+    outTime: row.outTime ?? "",
+    projectId: row.projectId ?? "",
+  };
 }
 
 export async function listAttendance(): Promise<AttendanceDTO[]> {
@@ -29,6 +44,7 @@ export async function replaceAttendance(items: AttendanceInput[]): Promise<Atten
         date: item.date,
         inTime: item.inTime || null,
         outTime: item.outTime || null,
+        projectId: item.projectId || null,
       };
       await tx.attendance.upsert({ where: { id: item.id }, create: { id: item.id, ...data }, update: data });
     }

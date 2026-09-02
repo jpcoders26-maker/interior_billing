@@ -140,6 +140,7 @@ model Project {
   allocations WorkerAllocation[]
   quotes      Quote[]
   invoices    Invoice[]
+  attendance  Attendance[]
 
   @@index([clientId])
   @@index([status])
@@ -177,15 +178,18 @@ model WorkerAllocation {
 }
 
 model Attendance {
-  id       String   @id
-  workerId String
-  date     DateTime @db.Date
-  inTime   String?
-  outTime  String?
+  id        String   @id
+  workerId  String
+  date      DateTime @db.Date
+  inTime    String?
+  outTime   String?
+  projectId String? // which site the worker was at that day — see docs/ARCHITECTURE.md "Manpower cost by site"
 
-  worker Worker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  worker  Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([workerId, date])
+  @@index([projectId, date])
   @@map("attendance")
 }
 
